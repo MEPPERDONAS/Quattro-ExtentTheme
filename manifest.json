@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "famas.theme-extend",
+  "name": "Theme Extend",
+  "version": "1.0.0",
+  "author": "famas",
+  "description": "Bar background and text color controls",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Theme Extend",
+    "description": "Bar background and text color controls",
+    "defaultSection": "right",
+    "category": "System",
+    "allowMultiple": false
+  }
+}
