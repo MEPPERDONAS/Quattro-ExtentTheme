@@ -17,24 +17,44 @@ Bar widget for Omarchy that extends your theme color control: choose the **borde
 - **Shell-styled tooltips**: each swatch shows the color name with the same tooltip style as the hero buttons.
 - **Keyboard navigation** within color grids (the "Borders Color" and "Bar Background" sections).
 
-## Installation
+## Install
 
-1. Copy the plugin folder to your Omarchy configuration:
+```bash
+omarchy plugin add https://github.com/MEPPERDONAS/Quattro-ExtentTheme.git --enable
+```
 
+Then place the widget in the bar:
 
-2. Enable the plugin:
+```bash
+omarchy bar put famas.theme-extend
+```
 
-   ```bash
-   omarchy plugin enable famas.theme-extend
-   ```
+The widget appears as a small palette icon in the bar. Move it if you want:
 
-3. Place it in the bar (bar widget):
+```bash
+omarchy bar move famas.theme-extend --section center
+```
 
-   ```bash
-   omarchy bar put famas.theme-extend
-   ```
+You can also validate it with:
 
-You can also validate the plugin with `omarchy plugin validate famas.theme-extend`.
+```bash
+omarchy plugin validate famas.theme-extend
+```
+
+### Updating
+
+```bash
+omarchy plugin update famas.theme-extend
+omarchy restart shell
+```
+
+### Removing it
+
+```bash
+omarchy plugin remove famas.theme-extend
+```
+
+That removes the plugin and its bar entry. The theme files it edits (`hyprland.lua` and `shell.toml`) remain in your Omarchy config, since they are part of your personal theme setup and not managed by the plugin itself.
 
 ## Usage
 
