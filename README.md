@@ -9,10 +9,11 @@ Bar widget for Omarchy that extends your theme color control: choose the **borde
 - **Borders Color**: select a color and write it to the `hyprland.lua` file in your theme state (`active_border_color`), applying it to active window and group borders.
 - **Bar Text**: change the bar text color (`[bar] text` in `shell.toml`).
 - **Bar Background**: change the bar background color (`[bar] background` in `shell.toml`).
-- **Built-in hero**: displays the active theme name and two action buttons with tooltips:
+- **Built-in hero**: displays the active theme name and three action buttons with tooltips:
   - `Switch Theme` — opens the Omarchy theme selector.
   - `Open Image Picker` — opens the Omarchy background image selector.
-- **Theme swatches**: all color palettes are read from the active theme's `colors.toml` and displayed in grids, with the currently selected color marked by an accent border.
+  - `Reset Bar Colors` — clears the custom `[bar]` background/text overrides written by the plugin so the bar falls back to the active theme defaults.
+- **Theme swatches**: all color palettes are read from the active theme's `colors.toml` (the palette for whichever theme is currently active in Omarchy) and displayed in grids, with the currently selected color marked by an accent border.
 - **Shell-styled tooltips**: each swatch shows the color name with the same tooltip style as the hero buttons.
 - **Keyboard navigation** within color grids (the "Borders Color" and "Bar Background" sections).
 
@@ -20,10 +21,6 @@ Bar widget for Omarchy that extends your theme color control: choose the **borde
 
 1. Copy the plugin folder to your Omarchy configuration:
 
-   ```bash
-   mkdir -p ~/.config/omarchy/plugins
-   cp -r famas.theme-extend ~/.config/omarchy/plugins/
-   ```
 
 2. Enable the plugin:
 
@@ -41,23 +38,14 @@ You can also validate the plugin with `omarchy plugin validate famas.theme-exten
 
 ## Usage
 
-Click the palette icon (󰏘) in the bar to open the panel. Three sections are displayed:
+Click the palette icon (󰏘) in the bar to open the panel. Three sections are displayed, and the hero includes the extra reset action next to the theme switcher and image picker. The swatches are always generated from the `colors.toml` of the currently active theme, so when you switch themes the palette updates automatically.
 
 1. **Borders Color** — click a swatch to apply the color to Hyprland active borders. The swatch that matches the color written in `hyprland.lua` as `active_border_color` appears highlighted.
 2. **Bar Text** — click a swatch to change the bar text color.
 3. **Bar Background** — click a swatch to change the bar background color.
+4. **Quick actions** — use `Switch Theme`, `Open Image Picker`, or `Reset Bar Colors` to restore the bar to the theme defaults.
 
 Hover over any swatch to see its tooltip with the color name.
-
-### Keyboard
-
-With the panel open, you can navigate with the keyboard in the enabled grids (Borders Color and Bar Background):
-
-- `h` / `l` — move left / right.
-- `j` / `k` — move down / up (row by row).
-- `Enter` / `Space` — apply the focused color.
-- `Tab` / `Shift+Tab` — move between panels.
-- `Esc` — close.
 
 ## Modified Files
 
@@ -85,4 +73,4 @@ Integration paths are defined as properties at the beginning of `Panel.qml` and 
 
 ## License
 
-Personal use. Distributed as-is, without warranties.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
