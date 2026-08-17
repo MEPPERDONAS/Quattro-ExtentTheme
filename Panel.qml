@@ -16,9 +16,9 @@ Panel {
   // colors.toml, plus whichever hex is currently written into
   // hyprland.lua as active_border_color (so the matching swatch can
   // show as selected).
-  readonly property string omarchyStateDir: "~/.local/state/omarchy/current"
+  readonly property string omarchyStateDir: Quickshell.env("HOME") + "/.local/state/omarchy/current"
   readonly property string themeDir: omarchyStateDir + "/theme"
-  readonly property string userShellPath: "/home/famas/.config/omarchy/shell.toml"
+  readonly property string userShellPath: Quickshell.env("HOME") + "/.config/omarchy/shell.toml"
   property var themeColors: []
   property string currentColor: ""
   // Whichever theme-palette hex is currently written into [bar] background /
@@ -162,6 +162,37 @@ Panel {
     if (!writeShellProc.running) writeShellProc.running = true
   }
 
+  // Removes the [bar] background/text overrides this plugin wrote into the
+  // user shell.toml so the bar falls back to the active theme's defaults.
+  // Everything else in the file (e.g. [font]) is preserved.
+  readonly property string barResetAwkScript:
+    'BEGIN { insec = 0; buf = ""; nonempty = 0 }\n' +
+    '/^\\[/ {\n' +
+    '  if (insec) { if (nonempty) print buf; insec = 0; buf = ""; nonempty = 0 }\n' +
+    '  if ($0 == "[bar]") { insec = 1; buf = $0 }\n' +
+    '  else print\n' +
+    '  next\n' +
+    '}\n' +
+    'insec && $0 ~ /^[ \\t]*(background|text)[ \\t]*=/ { next }\n' +
+    'insec {\n' +
+    '  if ($0 !~ /^[ \\t]*$/) nonempty = 1\n' +
+    '  buf = buf "\\n" $0\n' +
+    '  next\n' +
+    '}\n' +
+    '{ print }\n' +
+    'END { if (insec && nonempty) print buf }\n'
+
+  function resetBarColors() {
+    root.barBackgroundColor = ""
+    root.barTextColor = ""
+    var path = root.userShellPath
+    writeShellProc.command = ["bash", "-c",
+      "mkdir -p \"$(dirname '" + path + "')\" && [ -f '" + path + "' ] || touch '" + path + "'; "
+      + "awk '" + root.barResetAwkScript + "' '" + path + "' > '" + path + ".tmp' "
+      + "&& mv '" + path + ".tmp' '" + path + "'"]
+    if (!writeShellProc.running) writeShellProc.running = true
+  }
+
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
@@ -245,6 +276,18 @@ Panel {
       waitForEnd: true
       onStreamFinished: root.refresh()
     }
+  }
+
+  // Detects theme switches no matter who triggered them (this panel's
+  // switcher, the `omarchy theme set` CLI, etc.): omarchy-theme-set rewrites
+  // theme.name on every switch, so bar color overrides get reset to the new
+  // theme's defaults — replacing the old external theme-set hook.
+  FileView {
+    id: themeChangeWatcher
+    path: root.omarchyStateDir + "/theme.name"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: root.resetBarColors()
   }
 
   // --- UI ---
@@ -373,6 +416,19 @@ Panel {
                 horizontalPadding: Style.space(5)
                 verticalPadding: Style.space(2)
                 onClicked: root.summonImagePicker()
+              }
+
+              // reset botton: clears the [bar] background/text overrides this plugin wrote into
+              Button {
+                id: resetBarButton
+                iconText: ""
+                tooltipText: "Reset Bar Colors"
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                iconSize: Style.font.subtitle * 1.5
+                horizontalPadding: Style.space(5)
+                verticalPadding: Style.space(2)
+                onClicked: root.resetBarColors()
               }
             }
           }
