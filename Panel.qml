@@ -34,6 +34,28 @@ Panel {
   // -> "tokyo-night").
   property string themeName: ""
 
+  // WCAG AA contrast ratio used to gate Bar Background swatches against the
+  // currently selected Bar Text color (4.5:1 is the AA threshold for normal text).
+  property real contrastThreshold: 4.5
+
+  // Effective text color: the explicit Bar Text override when set, otherwise
+  // the theme's `foreground` color (Omarchy's default for bar text), so
+  // contrast can be judged even before the user picks a text color.
+  readonly property string effectiveTextColor: {
+    if (root.barTextColor) return root.barTextColor
+    for (var i = 0; i < root.themeColors.length; i++) {
+      if (root.themeColors[i].name === "foreground") return root.themeColors[i].hex
+    }
+    return ""
+  }
+
+  // True when the applied bar background fails the contrast threshold against
+  // the effective text color, no matter which of the two was chosen first.
+  readonly property bool barBackgroundConflict:
+    root.barBackgroundColor !== "" &&
+    root.effectiveTextColor !== "" &&
+    !Model.hasEnoughContrast(root.barBackgroundColor, root.effectiveTextColor, root.contrastThreshold)
+
   // Swatch corner rounding: half the system corner radius so small swatches
   // stay subtle, clamped to at least 1px so corners never look cut off.
   readonly property int swatchRadius: Math.max(1, Math.round(Style.cornerRadius / 2))
@@ -98,6 +120,55 @@ Panel {
     if (!bgSwitcherProc.running) bgSwitcherProc.running = true
   }
 
+  // Semantic guard: a swatch named like "background" must not be pickable as
+  // bar text and one named like "foreground" must not be pickable as bar
+  // background, or the bar would be illegible by design.
+  function isBackgroundLike(name) { return Model.matchesRole(name, "background") }
+  function isForegroundLike(name) { return Model.matchesRole(name, "foreground") }
+
+  // Looks up the theme-palette name of a hex, for readable tooltips.
+  function colorNameFor(hex) {
+    if (!hex) return ""
+    for (var i = 0; i < root.themeColors.length; i++) {
+      if (root.themeColors[i].hex === hex) return root.themeColors[i].name
+    }
+    return hex
+  }
+
+  // Accessibility gate: a Bar Background candidate is unusable when a Bar
+  // Text color is selected and the pair fails the WCAG contrast threshold
+  // (which includes the exact same color, ratio 1:1). No selection means no
+  // restriction yet.
+  function isBarBackgroundDisabled(hex) {
+    if (!root.barTextColor) return false
+    return !Model.hasEnoughContrast(hex, root.barTextColor, root.contrastThreshold)
+  }
+
+  // Resolves the contrast conflict by writing a compliant text color: the
+  // theme's `foreground` when it qualifies (the default), otherwise the
+  // available color with the highest contrast against the selected background.
+  function fixTextColor() {
+    if (!root.barBackgroundColor) return
+    var candidates = root.themeColors.filter(function(c) {
+      return !root.isBackgroundLike(c.name) &&
+             Model.hasEnoughContrast(c.hex, root.barBackgroundColor, root.contrastThreshold)
+    })
+    if (!candidates.length) return
+    var chosen = null
+    for (var i = 0; i < candidates.length; i++) {
+      if (candidates[i].name === "foreground") { chosen = candidates[i]; break }
+    }
+    if (!chosen) {
+      chosen = candidates[0]
+      var best = Model.contrastRatio(chosen.hex, root.barBackgroundColor)
+      for (var j = 1; j < candidates.length; j++) {
+        var ratio = Model.contrastRatio(candidates[j].hex, root.barBackgroundColor)
+        if (ratio > best) { chosen = candidates[j]; best = ratio }
+      }
+    }
+    root.setBarColor("text", chosen.hex)
+  }
+
   // Nueva función para lanzar el theme switcher
   function runThemeSwitcher() {
     root.close()
@@ -129,23 +200,30 @@ Panel {
     if (!writeColorProc.running) writeColorProc.running = true
   }
 
-  readonly property string barAwkScript:
-    'BEGIN { q = sprintf("%c", 34); insec = 0; sawBar = 0; found = 0 }\n' +
-    '/^\\[/ {\n' +
-    '  if (insec && !found) { print key" = "q val q; found = 1 }\n' +
-    '  insec = ($0 == "[bar]")\n' +
-    '  if (insec) sawBar = 1\n' +
-    '  print\n' +
-    '  next\n' +
-    '}\n' +
-    '{\n' +
-    '  if (insec && $0 ~ "^"key"[ \\t]*=") { print key" = "q val q; found = 1; next }\n' +
-    '  print\n' +
-    '}\n' +
-    'END {\n' +
-    '  if (insec && !found) print key" = "q val q\n' +
-    '  else if (!sawBar) { print ""; print "[bar]"; print key" = "q val q }\n' +
-    '}\n'
+  // Builds the awk script that upserts `key = val` inside the given TOML
+  // section: replaces an existing key in place, appends it at the section's
+  // end when missing, or creates the whole section when absent.
+  function sectionAwkScript(section) {
+    return 'BEGIN { q = sprintf("%c", 34); insec = 0; saw = 0; found = 0 }\n' +
+      '/^\\[/ {\n' +
+      '  if (insec && !found) { print key" = "q val q; found = 1 }\n' +
+      '  insec = ($0 == "' + section + '")\n' +
+      '  if (insec) saw = 1\n' +
+      '  print\n' +
+      '  next\n' +
+      '}\n' +
+      '{\n' +
+      '  if (insec && $0 ~ "^"key"[ \\t]*=") { print key" = "q val q; found = 1; next }\n' +
+      '  print\n' +
+      '}\n' +
+      'END {\n' +
+      '  if (insec && !found) print key" = "q val q\n' +
+      '  else if (!saw) { print ""; print "' + section + '"; print key" = "q val q }\n' +
+      '}\n'
+  }
+
+  readonly property string barAwkScript: root.sectionAwkScript("[bar]")
+  readonly property string popupsAwkScript: root.sectionAwkScript("[popups]")
 
   function setBarColor(key, hex) {
     if (key !== "background" && key !== "text") return
@@ -155,32 +233,42 @@ Panel {
     else root.barTextColor = hex
 
     var path = root.userShellPath
-    writeShellProc.command = ["bash", "-c",
-      "mkdir -p \"$(dirname '" + path + "')\" && [ -f '" + path + "' ] || touch '" + path + "'; "
-      + "awk -v key='" + key + "' -v val='" + hex + "' '" + root.barAwkScript + "' '" + path + "' > '" + path + ".tmp' "
-      + "&& mv '" + path + ".tmp' '" + path + "'"]
+    var cmd = "mkdir -p \"$(dirname '" + path + "')\" && [ -f '" + path + "' ] || touch '" + path + "'; "
+    if (key === "background") {
+      // The chosen bar background also drives the [popups] surface so
+      // dropdowns and panels read as the same surface; resetBarColors
+      // clears both together.
+      cmd += "awk -v key='background' -v val='" + hex + "' '" + root.barAwkScript + "' '" + path + "' > '" + path + ".tmp' && mv '" + path + ".tmp' '" + path + "'; "
+      cmd += "awk -v key='background' -v val='" + hex + "' '" + root.popupsAwkScript + "' '" + path + "' > '" + path + ".tmp' && mv '" + path + ".tmp' '" + path + "'"
+    } else {
+      cmd += "awk -v key='text' -v val='" + hex + "' '" + root.barAwkScript + "' '" + path + "' > '" + path + ".tmp' && mv '" + path + ".tmp' '" + path + "'"
+    }
+    writeShellProc.command = ["bash", "-c", cmd]
     if (!writeShellProc.running) writeShellProc.running = true
   }
 
-  // Removes the [bar] background/text overrides this plugin wrote into the
-  // user shell.toml so the bar falls back to the active theme's defaults.
+  // Removes the bar/popups overrides this plugin wrote into the user
+  // shell.toml so those surfaces fall back to the active theme's defaults.
   // Everything else in the file (e.g. [font]) is preserved.
   readonly property string barResetAwkScript:
-    'BEGIN { insec = 0; buf = ""; nonempty = 0 }\n' +
+    'BEGIN { insec = ""; buf = ""; nonempty = 0 }\n' +
     '/^\\[/ {\n' +
-    '  if (insec) { if (nonempty) print buf; insec = 0; buf = ""; nonempty = 0 }\n' +
-    '  if ($0 == "[bar]") { insec = 1; buf = $0 }\n' +
-    '  else print\n' +
+    '  if (insec != "") { if (nonempty) print buf; insec = ""; buf = ""; nonempty = 0 }\n' +
+    '  if ($0 == "[bar]") insec = "bar"\n' +
+    '  else if ($0 == "[popups]") insec = "popups"\n' +
+    '  else { print; next }\n' +
+    '  buf = $0\n' +
     '  next\n' +
     '}\n' +
-    'insec && $0 ~ /^[ \\t]*(background|text)[ \\t]*=/ { next }\n' +
-    'insec {\n' +
+    'insec == "bar" && $0 ~ /^[ \\t]*(background|text)[ \\t]*=/ { next }\n' +
+    'insec == "popups" && $0 ~ /^[ \\t]*background[ \\t]*=/ { next }\n' +
+    'insec != "" {\n' +
     '  if ($0 !~ /^[ \\t]*$/) nonempty = 1\n' +
     '  buf = buf "\\n" $0\n' +
     '  next\n' +
     '}\n' +
     '{ print }\n' +
-    'END { if (insec && nonempty) print buf }\n'
+    'END { if (insec != "" && nonempty) print buf }\n'
 
   function resetBarColors() {
     root.barBackgroundColor = ""
@@ -503,7 +591,7 @@ Panel {
             spacing: Style.spacing.xs
 
             Repeater {
-              model: root.themeColors
+              model: root.themeColors.filter(function(c) { return !root.isBackgroundLike(c.name) })
 
               BarColorSwatch {
                 required property var modelData
@@ -539,7 +627,7 @@ Panel {
             spacing: Style.spacing.xs
 
             Repeater {
-              model: root.themeColors
+              model: root.themeColors.filter(function(c) { return !root.isForegroundLike(c.name) })
 
               BarColorSwatch {
                 required property var modelData
@@ -549,7 +637,60 @@ Panel {
                 selectedHex: root.barBackgroundColor
                 swatchSize: 36
                 keyboardNavigable: true
+                disabled: root.isBarBackgroundDisabled(modelData.hex)
                 onPicked: function(hex) { root.setBarColor("background", hex) }
+              }
+            }
+          }
+
+          // ---------- Contrast warning: applied background vs effective text ----------
+          Rectangle {
+            visible: root.barBackgroundConflict
+            width: parent.width
+            radius: root.swatchRadius
+            color: Color.tooltip.background
+            border.width: 1
+            border.color: Qt.darker(root.bar.foreground, 1.6)
+            implicitHeight: warningRow.implicitHeight + Style.space(16)
+
+            Row {
+              id: warningRow
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.margins: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(8)
+
+              Text {
+                text: "⚠"
+                color: Color.accent
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.subtitle
+                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              Text {
+                id: warningText
+                text: "Text color (" + root.colorNameFor(root.effectiveTextColor) + ") has insufficient contrast with this background."
+                width: parent.width - warningFixButton.implicitWidth - parent.spacing * 3
+                color: root.bar.foreground
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.Wrap
+                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              Button {
+                id: warningFixButton
+                iconText: ""
+                tooltipText: "Match text to an available color with sufficient contrast (prefers foreground)"
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                iconSize: Style.font.subtitle
+                horizontalPadding: Style.space(5)
+                verticalPadding: Style.space(2)
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: root.fixTextColor()
               }
             }
           }
@@ -573,6 +714,7 @@ Panel {
     property int swatchIndex: -1
     property bool keyboardNavigable: false
     property int swatchSize: 36
+    property bool disabled: false
 
     signal picked(string hex)
 
@@ -580,15 +722,26 @@ Panel {
       barSwatch.selectedHex !== "" && barSwatch.selectedHex === barSwatch.swatchHex
 
     readonly property bool hasCursor:
-      barSwatchArea.containsMouse ||
-      (barSwatch.keyboardNavigable &&
-       root.cursorActive &&
-       root.selectedIndex === barSwatch.swatchIndex)
+      !barSwatch.disabled && (
+        barSwatchArea.containsMouse ||
+        (barSwatch.keyboardNavigable &&
+         root.cursorActive &&
+         root.selectedIndex === barSwatch.swatchIndex))
+
+    readonly property string tooltipText:
+      barSwatch.disabled
+        ? "Insufficient contrast against " + root.colorNameFor(root.barTextColor)
+        : barSwatch.swatchName
+
+    // Marker color auto-adapted to the swatch color so the "SET" badge stays
+    // readable on both dark and light backgrounds.
+    readonly property color markerColor: Model.relativeLuminance(barSwatch.swatchHex) > 0.5 ? "#1a1a1a" : "#ffffff"
 
     width: Style.space(barSwatch.swatchSize)
     height: Style.space(barSwatch.swatchSize / 2)
     radius: root.swatchRadius
     color: swatchHex
+    opacity: disabled ? 0.3 : 1.0
     border.width: isSelected ? 3 : (hasCursor ? 2 : 1)
     border.color: isSelected ? Color.accent : Qt.darker(root.bar.foreground, 1.6)
 
@@ -599,7 +752,7 @@ Panel {
 
     ToolTip {
       visible: barSwatchArea.containsMouse
-      text: barSwatch.swatchName
+      text: barSwatch.tooltipText
       delay: 400
       padding: 0
       background: BorderSurface {
@@ -608,7 +761,7 @@ Panel {
         radius: 0
       }
       contentItem: Text {
-        text: barSwatch.swatchName
+        text: barSwatch.tooltipText
         color: Color.tooltip.text
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.bodySmall
@@ -623,16 +776,42 @@ Panel {
       id: barSwatchArea
       anchors.fill: parent
       hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
+      cursorShape: barSwatch.disabled ? Qt.ArrowCursor : Qt.PointingHandCursor
 
       onContainsMouseChanged: {
-        if (containsMouse && barSwatch.keyboardNavigable && barSwatch.swatchIndex >= 0) {
+        if (containsMouse && !barSwatch.disabled && barSwatch.keyboardNavigable && barSwatch.swatchIndex >= 0) {
           root.cursorActive = true
           root.selectedIndex = barSwatch.swatchIndex
         }
       }
 
-      onClicked: barSwatch.picked(barSwatch.swatchHex)
+      onClicked: {
+        if (!barSwatch.disabled) barSwatch.picked(barSwatch.swatchHex)
+      }
+    }
+
+    // Visual reference for the active color: a dot plus the word "SET" on
+    // the selected swatch of each grid.
+    Row {
+      anchors.centerIn: parent
+      visible: barSwatch.isSelected
+      spacing: Style.space(3)
+
+      Rectangle {
+        width: Style.space(4)
+        height: Style.space(4)
+        radius: Style.space(2)
+        anchors.verticalCenter: parent.verticalCenter
+        color: barSwatch.markerColor
+      }
+
+      Text {
+        text: "SET"
+        color: barSwatch.markerColor
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.caption
+        font.bold: true
+      }
     }
   }
 }

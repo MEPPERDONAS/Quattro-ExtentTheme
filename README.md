@@ -8,7 +8,7 @@ Bar widget for Omarchy that extends your theme color control: choose the **borde
 
 - **Borders Color**: select a color and write it to the `hyprland.lua` file in your theme state (`active_border_color`), applying it to active window and group borders.
 - **Bar Text**: change the bar text color (`[bar] text` in `shell.toml`).
-- **Bar Background**: change the bar background color (`[bar] background` in `shell.toml`).
+- **Bar Background**: change the bar background color (`[bar] background` and `[popup] background`  in `shell.toml`).
 - **Built-in hero**: displays the active theme name and three action buttons with tooltips:
   - `Switch Theme` — opens the Omarchy theme selector.
   - `Open Image Picker` — opens the Omarchy background image selector.
