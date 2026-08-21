@@ -2,20 +2,22 @@
 
 ![Theme Extend preview](preview.png)
 
-Bar widget for Omarchy that extends your theme color control: choose the **border color (Hyprland)**, **bar text color**, and **bar background color** directly from a color picker with all colors from your active theme.
+Bar widget for Omarchy that extends the active theme palette with direct color controls for the active Hyprland border, the bar text, and the bar background. It reads the current theme colors from Omarchy, updates the theme state, and keeps the UI synchronized with the active theme and the current overrides.
 
 ## Features
 
-- **Borders Color**: select a color and write it to the `hyprland.lua` file in your theme state (`active_border_color`), applying it to active window and group borders.
-- **Bar Text**: change the bar text color (`[bar] text` in `shell.toml`).
-- **Bar Background**: change the bar background color (`[bar] background` and `[popup] background`  in `shell.toml`).
-- **Built-in hero**: displays the active theme name and three action buttons with tooltips:
-  - `Switch Theme` — opens the Omarchy theme selector.
-  - `Open Image Picker` — opens the Omarchy background image selector.
-  - `Reset Bar Colors` — clears the custom `[bar]` background/text overrides written by the plugin so the bar falls back to the active theme defaults.
-- **Theme swatches**: all color palettes are read from the active theme's `colors.toml` (the palette for whichever theme is currently active in Omarchy) and displayed in grids, with the currently selected color marked by an accent border.
-- **Shell-styled tooltips**: each swatch shows the color name with the same tooltip style as the hero buttons.
-- **Keyboard navigation** within color grids (the "Borders Color" and "Bar Background" sections).
+- **Borders Color**: writes the selected color to `active_border_color` in the active theme's `hyprland.lua` state file. If the file does not exist, it creates a minimal `hl.config(...)` template with a default inactive border color.
+- **Bar Text**: writes the selected hex color to `[bar] text` in `shell.toml`.
+- **Bar Background**: writes the selected hex color to `[bar] background` and also to `[popups] background` in `shell.toml` so popup surfaces stay consistent with the bar background.
+- **Theme-aware palette**: reads all swatches from the active theme's `colors.toml`, deduplicates equal hex values, and marks the current selection with a visible `SET` marker.
+- **Theme and background actions in the hero**: includes the following buttons with tooltips:
+  - `Switch Theme` — invokes the Omarchy theme switcher.
+  - `Open Image Picker` — invokes the Omarchy background selector.
+  - `Reset Bar Colors` — removes the plugin-managed bar overrides so the bar falls back to the active theme defaults.
+- **Contrast guard for bar colors**: when a text color is selected, background swatches that fail WCAG AA contrast against it are disabled. A warning box appears and offers a one-click fix that picks a readable text color automatically.
+- **Keyboard navigation**: supports left/right and up/down navigation within the swatch grids and activation with the keyboard.
+- **Automatic refresh**: watches the active theme and refreshes the palette when Omarchy changes the active theme or when the shell config is updated.
+- **Tooltips by color role**: each swatch shows the color name, and the disabled state explains the contrast issue against the current text color.
 
 ## Install
 
@@ -29,7 +31,7 @@ Then place the widget in the bar:
 omarchy bar put famas.theme-extend
 ```
 
-The widget appears as a small palette icon in the bar. Move it if you want:
+The widget appears as a small palette icon in the bar. You can move it if needed:
 
 ```bash
 omarchy bar move famas.theme-extend --section center
@@ -54,41 +56,43 @@ omarchy restart shell
 omarchy plugin remove famas.theme-extend
 ```
 
-That removes the plugin and its bar entry. The theme files it edits (`hyprland.lua` and `shell.toml`) remain in your Omarchy config, since they are part of your personal theme setup and not managed by the plugin itself.
+This removes the plugin and its bar entry. The files it edits in your Omarchy config remain in place, because they are part of your personal theme setup and not managed by the plugin itself.
 
 ## Usage
 
-Click the palette icon (󰏘) in the bar to open the panel. Three sections are displayed, and the hero includes the extra reset action next to the theme switcher and image picker. The swatches are always generated from the `colors.toml` of the currently active theme, so when you switch themes the palette updates automatically.
+Click the palette icon in the bar to open the panel. The UI is built around three sections:
 
-1. **Borders Color** — click a swatch to apply the color to Hyprland active borders. The swatch that matches the color written in `hyprland.lua` as `active_border_color` appears highlighted.
-2. **Bar Text** — click a swatch to change the bar text color.
-3. **Bar Background** — click a swatch to change the bar background color.
-4. **Quick actions** — use `Switch Theme`, `Open Image Picker`, or `Reset Bar Colors` to restore the bar to the theme defaults.
+1. **Borders Color** — click a swatch to apply it to `active_border_color` in the active theme state. The matching swatch is highlighted when the written value matches the current selection.
+2. **Bar Text** — click a swatch to set `[bar] text` in `shell.toml`.
+3. **Bar Background** — click a swatch to set `[bar] background`, and the plugin also updates `[popups] background` for the popup surface.
+4. **Quick actions** — use the hero buttons to switch themes, pick a background image, or reset managed bar colors.
 
-Hover over any swatch to see its tooltip with the color name.
+Hover over any swatch to read the color name. If the selected background and text color do not meet the contrast threshold, the swatch becomes disabled and the warning card offers automatic remediation.
 
 ## Modified Files
 
 | Action | File |
 | --- | --- |
-| Borders Color | `~/.local/state/omarchy/current/theme/hyprland.lua` (variable `active_border_color`) |
-| Bar Text / Background | `~/.config/omarchy/shell.toml` (section `[bar]`) |
+| Borders color | `~/.local/state/omarchy/current/theme/hyprland.lua` (`active_border_color`) |
+| Bar text | `~/.config/omarchy/shell.toml` (`[bar] text`) |
+| Bar background | `~/.config/omarchy/shell.toml` (`[bar] background`, `[popups] background`) |
 
-If `hyprland.lua` does not exist, the plugin creates a complete template with `hl.config(...)` and a default inactive border color.
+The widget also reads the active theme name from `~/.local/state/omarchy/current/theme.name` when available, and falls back to the resolved theme directory name if that file has not been written yet.
 
-> Note: grid swatches use the colors that Omarchy writes as hexadecimal values. If `shell.toml` uses a role name (e.g. `foreground`) instead of a hex value, no swatch appears selected until you choose a color with the plugin.
+> Note: the plugin only recognizes literal hex values in `shell.toml`. If a value is written as a role name such as `foreground`, it is treated as unmanaged by this plugin and no swatch is shown as selected until you choose a new color from the panel.
 
 ## Requirements
 
-- Omarchy (shell `quickshell`).
-- Font with Nerd Fonts icons for the hero and bar button icons.
-- Commands `omarchy-theme-switcher`, `omarchy-theme-set`, `omarchy-theme-bg-switcher`, and `omarchy-theme-bg-set` (included in Omarchy) for the theme and background pickers.
+- Omarchy with `quickshell`.
+- A Nerd Fonts-capable icon font for the hero and bar button icons.
+- Commands `omarchy-theme-switcher`, `omarchy-theme-set`, `omarchy-theme-bg-switcher`, and `omarchy-theme-bg-set` for theme/background selectors.
 
 ## Customization
 
-Integration paths are defined as properties at the beginning of `Panel.qml` and can be adjusted:
+The integration paths are defined as properties at the top of `Panel.qml` and can be adjusted if your setup differs:
 
-- `omarchyStateDir` — active theme state directory.
+- `omarchyStateDir` — current Omarchy state directory.
+- `themeDir` — current theme state directory.
 - `userShellPath` — path to the user's `shell.toml`.
 
 ## License

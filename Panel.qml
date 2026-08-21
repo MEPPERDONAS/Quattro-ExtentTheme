@@ -204,22 +204,42 @@ Panel {
   // section: replaces an existing key in place, appends it at the section's
   // end when missing, or creates the whole section when absent.
   function sectionAwkScript(section) {
-    return 'BEGIN { q = sprintf("%c", 34); insec = 0; saw = 0; found = 0 }\n' +
+    return 'BEGIN { q = sprintf("%c", 34); insec = 0; saw = 0; found = 0; managedSeen = 0; restorePending = 0 }\n' +
       '/^\\[/ {\n' +
-      '  if (insec && !found) { print key" = "q val q; found = 1 }\n' +
+      '  if (insec && !found) { print managed; print key" = "q val q; found = 1 }\n' +
       '  insec = ($0 == "' + section + '")\n' +
-      '  if (insec) saw = 1\n' +
+      '  if (insec) { saw = 1; found = 0; managedSeen = 0; restorePending = 0 }\n' +
       '  print\n' +
       '  next\n' +
       '}\n' +
-      '{\n' +
-      '  if (insec && $0 ~ "^"key"[ \\t]*=") { print key" = "q val q; found = 1; next }\n' +
+      'insec && $0 == managed { managedSeen = 1; next }\n' +
+      'insec && index($0, restore) == 1 {\n' +
       '  print\n' +
+      '  restorePending = 1\n' +
+      '  next\n' +
       '}\n' +
+      'insec && $0 ~ "^[ \\t]*"key"[ \\t]*=" {\n' +
+      '  if (!managedSeen && !restorePending) print restore $0\n' +
+      '  print managed\n' +
+      '  print key" = "q val q\n' +
+      '  found = 1\n' +
+      '  managedSeen = 0\n' +
+      '  restorePending = 0\n' +
+      '  next\n' +
+      '}\n' +
+      '{ print }\n' +
       'END {\n' +
-      '  if (insec && !found) print key" = "q val q\n' +
-      '  else if (!saw) { print ""; print "' + section + '"; print key" = "q val q }\n' +
+      '  if (insec && !found) { print managed; print key" = "q val q }\n' +
+      '  else if (!saw) { print ""; print "' + section + '"; print managed; print key" = "q val q }\n' +
       '}\n'
+  }
+
+  function managedMarker(section, key) {
+    return "# famas.theme-extend managed " + section + " " + key
+  }
+
+  function restoreMarker(section, key) {
+    return "# famas.theme-extend restore " + section + " " + key + ": "
   }
 
   readonly property string barAwkScript: root.sectionAwkScript("[bar]")
@@ -234,50 +254,73 @@ Panel {
 
     var path = root.userShellPath
     var cmd = "mkdir -p \"$(dirname '" + path + "')\" && [ -f '" + path + "' ] || touch '" + path + "'; "
-    if (key === "background") {
-      // The chosen bar background also drives the [popups] surface so
-      // dropdowns and panels read as the same surface; resetBarColors
-      // clears both together.
-      cmd += "awk -v key='background' -v val='" + hex + "' '" + root.barAwkScript + "' '" + path + "' > '" + path + ".tmp' && mv '" + path + ".tmp' '" + path + "'; "
-      cmd += "awk -v key='background' -v val='" + hex + "' '" + root.popupsAwkScript + "' '" + path + "' > '" + path + ".tmp' && mv '" + path + ".tmp' '" + path + "'"
-    } else {
-      cmd += "awk -v key='text' -v val='" + hex + "' '" + root.barAwkScript + "' '" + path + "' > '" + path + ".tmp' && mv '" + path + ".tmp' '" + path + "'"
+
+    function writeSection(section, script) {
+      return "awk " +
+        "-v key='" + key + "' " +
+        "-v val='" + hex + "' " +
+        "-v managed='" + root.managedMarker(section, key) + "' " +
+        "-v restore='" + root.restoreMarker(section, key) + "' " +
+        "'" + script + "' '" + path + "' > '" + path + ".tmp' && " +
+        "mv '" + path + ".tmp' '" + path + "'; "
     }
+
+    cmd += writeSection("[bar]", root.barAwkScript)
+    if (key === "background")
+      cmd += writeSection("[popups]", root.popupsAwkScript)
+
     writeShellProc.command = ["bash", "-c", cmd]
     if (!writeShellProc.running) writeShellProc.running = true
   }
 
-  // Removes the bar/popups overrides this plugin wrote into the user
-  // shell.toml so those surfaces fall back to the active theme's defaults.
-  // Everything else in the file (e.g. [font]) is preserved.
   readonly property string barResetAwkScript:
-    'BEGIN { insec = ""; buf = ""; nonempty = 0 }\n' +
+    'BEGIN {\n' +
+    '  insec = ""\n' +
+    '  restoreKey = ""\n' +
+    '  skipKey = ""\n' +
+    '  managed["[bar]\\034background"] = "# famas.theme-extend managed [bar] background"\n' +
+    '  managed["[bar]\\034text"] = "# famas.theme-extend managed [bar] text"\n' +
+    '  managed["[popups]\\034background"] = "# famas.theme-extend managed [popups] background"\n' +
+    '  restore["[bar]\\034background"] = "# famas.theme-extend restore [bar] background: "\n' +
+    '  restore["[bar]\\034text"] = "# famas.theme-extend restore [bar] text: "\n' +
+    '  restore["[popups]\\034background"] = "# famas.theme-extend restore [popups] background: "\n' +
+    '}\n' +
     '/^\\[/ {\n' +
-    '  if (insec != "") { if (nonempty) print buf; insec = ""; buf = ""; nonempty = 0 }\n' +
-    '  if ($0 == "[bar]") insec = "bar"\n' +
-    '  else if ($0 == "[popups]") insec = "popups"\n' +
-    '  else { print; next }\n' +
-    '  buf = $0\n' +
+    '  insec = ($0 == "[bar]" || $0 == "[popups]") ? $0 : ""\n' +
+    '  restoreKey = ""; skipKey = ""\n' +
+    '  print\n' +
     '  next\n' +
     '}\n' +
-    'insec == "bar" && $0 ~ /^[ \\t]*(background|text)[ \\t]*=/ { next }\n' +
-    'insec == "popups" && $0 ~ /^[ \\t]*background[ \\t]*=/ { next }\n' +
     'insec != "" {\n' +
-    '  if ($0 !~ /^[ \\t]*$/) nonempty = 1\n' +
-    '  buf = buf "\\n" $0\n' +
-    '  next\n' +
+    '  if (restoreKey != "") {\n' +
+    '    if ($0 == managed[insec "\\034" restoreKey]) { skipKey = restoreKey; restoreKey = ""; next }\n' +
+    '    restoreKey = ""\n' +
+    '  }\n' +
+    '  if (skipKey != "") {\n' +
+    '    key = skipKey; skipKey = ""\n' +
+    '    if ($0 ~ "^[ \\t]*" key "[ \\t]*=") next\n' +
+    '  }\n' +
+    '  for (key in managed) {\n' +
+    '    split(key, parts, "\\034")\n' +
+    '    if (parts[1] == insec && $0 == managed[key]) { skipKey = parts[2]; next }\n' +
+    '    if (parts[1] == insec && index($0, restore[key]) == 1) {\n' +
+    '      print substr($0, length(restore[key]) + 1)\n' +
+    '      restoreKey = parts[2]\n' +
+    '      next\n' +
+    '    }\n' +
+    '  }\n' +
     '}\n' +
-    '{ print }\n' +
-    'END { if (insec != "" && nonempty) print buf }\n'
+    '{ print }\n'
 
   function resetBarColors() {
     root.barBackgroundColor = ""
     root.barTextColor = ""
     var path = root.userShellPath
     writeShellProc.command = ["bash", "-c",
-      "mkdir -p \"$(dirname '" + path + "')\" && [ -f '" + path + "' ] || touch '" + path + "'; "
-      + "awk '" + root.barResetAwkScript + "' '" + path + "' > '" + path + ".tmp' "
-      + "&& mv '" + path + ".tmp' '" + path + "'"]
+      "mkdir -p \"$(dirname '" + path + "')\" && [ -f '" + path + "' ] || touch '" + path + "'; " +
+      "awk '" + root.barResetAwkScript + "' '" + path + "' > '" + path + ".tmp' && " +
+      "mv '" + path + ".tmp' '" + path + "'"
+    ]
     if (!writeShellProc.running) writeShellProc.running = true
   }
 
